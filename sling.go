@@ -38,6 +38,8 @@ type Sling struct {
 	header http.Header
 	// url tagged query structs
 	queryStructs []interface{}
+	// querymap
+	queryMap map[string]string
 	// json tagged body struct
 	bodyJSON interface{}
 	// url tagged body struct (form)
@@ -53,6 +55,7 @@ func New() *Sling {
 		method:       "GET",
 		header:       make(http.Header),
 		queryStructs: make([]interface{}, 0),
+		queryMap:     make(map[string]string),
 	}
 }
 
@@ -80,6 +83,7 @@ func (s *Sling) New() *Sling {
 		rawURL:       s.rawURL,
 		header:       headerCopy,
 		queryStructs: append([]interface{}{}, s.queryStructs...),
+		queryMap:     make(map[string]string),
 		bodyJSON:     s.bodyJSON,
 		bodyForm:     s.bodyForm,
 		body:         s.body,
@@ -209,6 +213,18 @@ func (s *Sling) QueryStruct(queryStruct interface{}) *Sling {
 	return s
 }
 
+/**
+	使用map 来指定参数
+ */
+func (s *Sling)QueryMap(queryMap map[string]string) *Sling {
+	if queryMap != nil {
+		for key, value := range queryMap{
+			s.queryMap[key] = value
+		}
+	}
+	return s
+}
+
 // Body
 
 // BodyJSON sets the Sling's bodyJSON. The value pointed to by the bodyJSON
@@ -264,6 +280,12 @@ func (s *Sling) Request() (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
+	
+	err = addQueryMap(reqURL,s.queryMap)
+	if err != nil {
+		return nil,err
+	}
+	
 	body, err := s.getRequestBody()
 	if err != nil {
 		return nil, err
@@ -296,6 +318,21 @@ func addQueryStructs(reqURL *url.URL, queryStructs []interface{}) error {
 			}
 		}
 	}
+	// url.Values format to a sorted "url encoded" string, e.g. "key=val&foo=bar"
+	reqURL.RawQuery = urlValues.Encode()
+	return nil
+}
+
+func addQueryMap(reqURL *url.URL,queryMap map[string]string) error {
+	urlValues, err := url.ParseQuery(reqURL.RawQuery)
+	if err != nil {
+		return err
+	}
+	
+	for key, value := range queryMap{
+		urlValues.Add(key, value)
+	}
+
 	// url.Values format to a sorted "url encoded" string, e.g. "key=val&foo=bar"
 	reqURL.RawQuery = urlValues.Encode()
 	return nil
@@ -389,10 +426,36 @@ func (s *Sling) Do(req *http.Request, successV, failureV interface{}) (*http.Res
 	}
 	// when err is nil, resp contains a non-nil resp.Body which must be closed
 	defer resp.Body.Close()
-	if strings.Contains(resp.Header.Get(contentType), jsonContentType) {
-		err = decodeResponseJSON(resp, successV, failureV)
-	}
+	err = decodeResponseJSON(resp, successV, failureV)
 	return resp, err
+}
+
+/**
+	返回结果为string
+ */
+func (s *Sling) DoString(req *http.Request) (*http.Response, string, error) {
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return resp,"",err
+	}
+	// when err is nil, resp contains a non-nil resp.Body which must be closed
+	defer resp.Body.Close()
+			
+	body,err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return resp,"",err
+	}
+	
+	return resp,string(body[:]),err
+}
+
+
+/**
+	直接执行Http请求
+ */
+func (s *Sling)DoReq(req *http.Request)(*http.Response,error)  {
+	resp, err := s.httpClient.Do(req)
+	return resp,err
 }
 
 // decodeResponse decodes response Body into the value pointed to by successV
